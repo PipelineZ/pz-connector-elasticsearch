@@ -1,0 +1,12 @@
+# Both directions through the packaged connector: read the seeded index, write an append output.
+search:
+  connector: elasticsearch
+  url: ${ES_URL}
+  entities:
+    orders_in:
+      read:
+        index: e2e-in
+    orders_out:
+      write:
+        index: e2e-out
+        strategy: append
