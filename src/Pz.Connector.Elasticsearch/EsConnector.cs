@@ -8,7 +8,7 @@ namespace Pz.Connector.Elasticsearch;
 /// <summary>Elasticsearch for pz: an index is a table-shaped dataset typed from its mapping and paged
 /// through a point in time; a sink output is a bulk append, a bulk upsert by <c>_id</c>, or a fresh
 /// index swapped in behind an alias.</summary>
-public sealed class EsConnector : IConnector
+public sealed class EsConnector : IConnector, ISourceConnector
 {
     private readonly ILoggerFactory _loggerFactory;
 
@@ -60,6 +60,12 @@ public sealed class EsConnector : IConnector
         return ValueTask.FromResult(errors.Count == 0 ? ValidationResult.Success : new ValidationResult(errors));
     }
 
+    ValueTask<ISource> ISourceConnector.OpenAsync(ConnectorConfig config, CancellationToken ct)
+    {
+        var connection = ParseOrThrow(config);
+        return ValueTask.FromResult<ISource>(new EsSource(connection, EsClientFactory.Create(connection), _loggerFactory.CreateLogger<EsSource>()));
+    }
+
     public async ValueTask<ConnectionCheck> CheckConnectionAsync(ConnectorConfig config, CancellationToken ct)
     {
         var errors = new List<string>();
@@ -87,5 +93,12 @@ public sealed class EsConnector : IConnector
             // probe result and still propagates.
             return new ConnectionCheck(false, connection.Redactor.Redact($"elasticsearch: {ex.Message}"));
         }
+    }
+
+    private static EsConnectionConfig ParseOrThrow(ConnectorConfig config)
+    {
+        var errors = new List<string>();
+        return EsConnectionConfig.Parse(config, errors)
+            ?? throw new PzConnectorException("elasticsearch: invalid connection config: " + string.Join("; ", errors), isTransient: false);
     }
 }
