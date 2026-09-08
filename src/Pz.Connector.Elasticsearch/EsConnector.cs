@@ -8,13 +8,22 @@ namespace Pz.Connector.Elasticsearch;
 /// <summary>Elasticsearch for pz: an index is a table-shaped dataset typed from its mapping and paged
 /// through a point in time; a sink output is a bulk append, a bulk upsert by <c>_id</c>, or a fresh
 /// index swapped in behind an alias.</summary>
-public sealed class EsConnector : IConnector, ISourceConnector
+public sealed class EsConnector : IConnector, ISourceConnector, ISinkConnector
 {
     private readonly ILoggerFactory _loggerFactory;
+    private readonly TimeProvider _time;
+    private readonly Random _random;
 
     public EsConnector(ILoggerFactory? loggerFactory = null)
+        : this(loggerFactory, TimeProvider.System, Random.Shared)
+    {
+    }
+
+    internal EsConnector(ILoggerFactory? loggerFactory, TimeProvider time, Random random)
     {
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _time = time;
+        _random = random;
     }
 
     public ConnectorInfo Info { get; } = new(
@@ -64,6 +73,12 @@ public sealed class EsConnector : IConnector, ISourceConnector
     {
         var connection = ParseOrThrow(config);
         return ValueTask.FromResult<ISource>(new EsSource(connection, EsClientFactory.Create(connection), _loggerFactory.CreateLogger<EsSource>()));
+    }
+
+    ValueTask<ISink> ISinkConnector.OpenAsync(ConnectorConfig config, CancellationToken ct)
+    {
+        var connection = ParseOrThrow(config);
+        return ValueTask.FromResult<ISink>(new EsSink(connection, EsClientFactory.Create(connection), _loggerFactory.CreateLogger<EsSink>(), _time, _random));
     }
 
     public async ValueTask<ConnectionCheck> CheckConnectionAsync(ConnectorConfig config, CancellationToken ct)
