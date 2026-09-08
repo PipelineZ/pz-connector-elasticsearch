@@ -55,7 +55,7 @@ internal static class EsErrors
             detail = $"{head} (HTTP {status}{hint})";
         }
 
-        return new PzConnectorException(redactor.Redact($"elasticsearch: {context}: {detail}"), transient, innerException: original);
+        return new PzConnectorException(Message(redactor, $"{context}: {detail}"), transient, innerException: original);
     }
 
     /// <summary>A failed typed call: the client has already parsed the server error envelope.</summary>
@@ -121,13 +121,16 @@ internal static class EsErrors
             return already;
         }
 
-        return new PzConnectorException(redactor.Redact($"elasticsearch: {context}: {ex.Message}"),
-            IsTransient(null, null, ex), innerException: ex);
+        return new PzConnectorException(Message(redactor, $"{context}: {ex.Message}"), IsTransient(null, null, ex), innerException: ex);
     }
 
     public static PzConnectorException Fatal(string message, EsRedactor redactor) =>
-        new(redactor.Redact($"elasticsearch: {message}"), isTransient: false);
+        new(Message(redactor, message), isTransient: false);
 
     public static PzConnectorException Transient(string message, EsRedactor redactor) =>
-        new(redactor.Redact($"elasticsearch: {message}"), isTransient: true);
+        new(Message(redactor, message), isTransient: true);
+
+    /// <summary>The connector prefix goes on after redaction: a password that happens to be a
+    /// substring of "elasticsearch" must not shred the one part of the message that is ours.</summary>
+    public static string Message(EsRedactor redactor, string text) => "elasticsearch: " + redactor.Redact(text);
 }

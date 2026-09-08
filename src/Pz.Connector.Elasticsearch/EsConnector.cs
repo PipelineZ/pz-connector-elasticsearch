@@ -106,7 +106,7 @@ public sealed class EsConnector : IConnector, ISourceConnector, ISinkConnector
             // Every failure is a failed probe, never a crash -- an unreadable ca_cert file throws out
             // of the factory, and reporting it is the whole point of the check. Cancellation is not a
             // probe result and still propagates.
-            return new ConnectionCheck(false, connection.Redactor.Redact($"elasticsearch: {ex.Message}"));
+            return new ConnectionCheck(false, EsErrors.Message(connection.Redactor, $"checking the connection: {ex.Message}"));
         }
     }
 

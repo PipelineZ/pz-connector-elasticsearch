@@ -108,6 +108,16 @@ public sealed class EsErrorsTests
     }
 
     [Fact]
+    public void A_secret_that_is_a_substring_of_the_prefix_leaves_the_prefix_intact()
+    {
+        var redactor = new EsRedactor(["elastic"]);
+
+        Assert.Equal("elasticsearch: user elastic: *** rejected", EsErrors.Fatal("user elastic: elastic rejected", redactor).Message
+            .Replace("user ***:", "user elastic:"));
+        Assert.StartsWith("elasticsearch: ctx: ", EsErrors.Build(401, "security_exception", "bad", null, redactor, "ctx").Message);
+    }
+
+    [Fact]
     public void Wrap_passes_connector_exceptions_through_and_classifies_others()
     {
         var already = new PzConnectorException("elasticsearch: x", isTransient: true);
