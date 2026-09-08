@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Pz.Connector.Elasticsearch/Pz.Connector.Elasticsearch.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Pz.Connector.Elasticsearch.Tests/Pz.Connector.Elasticsearch.Tests.csproj" />
+  </Folder>
+</Solution>
