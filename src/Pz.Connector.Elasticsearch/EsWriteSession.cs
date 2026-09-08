@@ -68,11 +68,17 @@ internal sealed class EsWriteSession : ISinkWriteSession
         _committed = true;
         await FlushAsync(ct).ConfigureAwait(false);
 
-        var refreshed = await _client.Indices.RefreshAsync(new RefreshRequest(Indices.Parse(_target)), ct).ConfigureAwait(false);
-        ct.ThrowIfCancellationRequested();
-        if (!refreshed.IsValidResponse)
+        // An append or merge that sent nothing has no index to refresh: Elasticsearch creates the
+        // target on the first bulk, and refreshing an absent index is a 404, not a no-op. A replace
+        // always has its staging index.
+        if (_requests > 0 || _replace is not null)
         {
-            throw EsErrors.FromResponse(refreshed, _redactor, $"output '{_output.Index}': refreshing '{_target}'");
+            var refreshed = await _client.Indices.RefreshAsync(new RefreshRequest(Indices.Parse(_target)), ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (!refreshed.IsValidResponse)
+            {
+                throw EsErrors.FromResponse(refreshed, _redactor, $"output '{_output.Index}': refreshing '{_target}'");
+            }
         }
 
         if (_replace is { } replace)
@@ -123,7 +129,9 @@ internal sealed class EsWriteSession : ISinkWriteSession
         ct.ThrowIfCancellationRequested();
         _requests++;
         var context = $"output '{_output.Index}': bulk of {count} document(s) into '{_target}'";
-        if (!response.IsValidResponse)
+        // A 200 whose items carry errors is "invalid" to the client too; the items say what went
+        // wrong, so they are read first and only a failed call falls through to the envelope.
+        if (!response.ApiCallDetails.HasSuccessfulStatusCode)
         {
             throw EsErrors.FromResponse(response, _redactor, context);
         }
