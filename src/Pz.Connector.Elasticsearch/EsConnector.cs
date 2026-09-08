@@ -27,13 +27,65 @@ public sealed class EsConnector : IConnector
         ConnectorCapabilities.ColumnPruning | ConnectorCapabilities.BoundedWindow | ConnectorCapabilities.InclusiveWatermarkBound
         | ConnectorCapabilities.Merge | ConnectorCapabilities.ReplaceWrites;
 
-    public string ConnectionConfigSchema => """{ "type": "object" }""";
+    public string ConnectionConfigSchema => """
+        { "type": "object", "required": ["url"], "properties": {
+            "url": { "type": "string" },
+            "api_key": { "type": "string" },
+            "username": { "type": "string" },
+            "password": { "type": "string" },
+            "ca_cert": { "type": "string" },
+            "ca_fingerprint": { "type": "string" },
+            "insecure": { "type": "boolean" },
+            "timeout": { "type": "integer", "minimum": 1 },
+            "base_dir": { "type": "string" } },
+          "additionalProperties": false }
+        """;
 
-    public string DatasetConfigSchema => """{ "type": "object" }""";
+    public string DatasetConfigSchema => """
+        { "type": "object", "properties": {
+            "index": { "type": "string" },
+            "query": { "type": ["object", "string"] },
+            "page_size": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "json_fields": { "type": "array", "items": { "type": "string" } },
+            "pit_keep_alive": { "type": "string" },
+            "bulk_size": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "bulk_bytes": { "type": "integer", "minimum": 1024 } },
+          "additionalProperties": false }
+        """;
 
-    public ValueTask<ValidationResult> ValidateAsync(ConnectorConfig config, CancellationToken ct) =>
-        ValueTask.FromResult(ValidationResult.Success);
+    public ValueTask<ValidationResult> ValidateAsync(ConnectorConfig config, CancellationToken ct)
+    {
+        var errors = new List<string>();
+        EsConnectionConfig.Parse(config, errors);
+        return ValueTask.FromResult(errors.Count == 0 ? ValidationResult.Success : new ValidationResult(errors));
+    }
 
-    public ValueTask<ConnectionCheck> CheckConnectionAsync(ConnectorConfig config, CancellationToken ct) =>
-        throw new NotImplementedException();
+    public async ValueTask<ConnectionCheck> CheckConnectionAsync(ConnectorConfig config, CancellationToken ct)
+    {
+        var errors = new List<string>();
+        var connection = EsConnectionConfig.Parse(config, errors);
+        if (connection is null)
+        {
+            return new ConnectionCheck(false, string.Join("; ", errors));
+        }
+
+        try
+        {
+            var client = EsClientFactory.Create(connection);
+            var info = await client.InfoAsync(ct).ConfigureAwait(false);
+            if (!info.IsValidResponse)
+            {
+                return new ConnectionCheck(false, EsErrors.FromResponse(info, connection.Redactor, "checking the connection").Message);
+            }
+
+            return new ConnectionCheck(true, $"{info.ClusterName} ({info.Version?.Number})");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Every failure is a failed probe, never a crash -- an unreadable ca_cert file throws out
+            // of the factory, and reporting it is the whole point of the check. Cancellation is not a
+            // probe result and still propagates.
+            return new ConnectionCheck(false, connection.Redactor.Redact($"elasticsearch: {ex.Message}"));
+        }
+    }
 }
