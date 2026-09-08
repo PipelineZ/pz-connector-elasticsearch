@@ -1,0 +1,9 @@
+connection:
+  # Interpolated from the environment by `pz connector test --config`, the same way connections.yml
+  # is: the CI job exports ES_URL for both.
+  url: ${ES_URL}
+read:
+  dataset: e2e-in
+write:
+  output: e2e-probe
+  mode: append

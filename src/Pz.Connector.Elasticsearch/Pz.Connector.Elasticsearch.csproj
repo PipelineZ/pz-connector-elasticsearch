@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <Description>Elasticsearch source (mapping-typed, point-in-time paged, watermark range filters) and sink (bulk append/merge, replace by alias swap) connector for PipelineZ (pz), served out of process.</Description>
+    <!-- Native AOT. PublishAot is set here as well as by PzPackaging: through the NuGet package the
+         SDK's derivation lands after restore has already decided whether to pull the ILCompiler
+         pack, and a publish without it silently falls back to a non-AOT layout. The Elastic client's
+         generic document paths (SearchAsync<T>, BulkIndexOperation<T>) are reflection-bound and are
+         never called; search and bulk go through the client's transport instead. -->
+    <PzPackaging>aot</PzPackaging>
+    <PublishAot>true</PublishAot>
+    <!-- ca_cert is a project-relative path. -->
+    <PzProjectDirectoryAnchor>true</PzProjectDirectoryAnchor>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Pz.Connectors.Sdk" Version="0.6.0" />
+    <PackageReference Include="Pz.Connectors.Abstractions" Version="0.6.0" />
+    <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.5.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Pz.Connector.Elasticsearch.Tests" />
+  </ItemGroup>
+
+</Project>
