@@ -134,14 +134,14 @@ public sealed class EsSchemaMapperTests
     }
 
     [Fact]
-    public void Project_keeps_plan_order_and_returns_the_full_plan_for_an_unknown_name()
+    public void Project_follows_hint_order_and_returns_the_full_plan_for_an_unknown_name()
     {
         var plan = EsSchemaMapper.Plan(Mappings(Wide), Dataset(), "d", EsRedactor.None);
 
         var projected = plan.Project(["_id", "o.city", "b"]);
-        Assert.Equal(["b", "o.city", "_id"], projected.Columns.Select(c => c.Name));
-        Assert.Equal(["b", "o.city", "_id"], projected.Schema.FieldsList.Select(f => f.Name));
-        Assert.Equal(["b", "o.city"], projected.SourcePaths);
+        Assert.Equal(["_id", "o.city", "b"], projected.Columns.Select(c => c.Name));
+        Assert.Equal(["_id", "o.city", "b"], projected.Schema.FieldsList.Select(f => f.Name));
+        Assert.Equal(["o.city", "b"], projected.SourcePaths);
 
         Assert.Same(plan, plan.Project(["b", "nope"]));
         Assert.Same(plan, plan.Project(null));

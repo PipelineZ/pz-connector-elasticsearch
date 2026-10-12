@@ -49,6 +49,7 @@ internal sealed class EsWriteSession : ISinkWriteSession
     public async ValueTask WriteBatchAsync(RecordBatch batch, CancellationToken ct)
     {
         ThrowIfFinished();
+        ct.ThrowIfCancellationRequested();
         for (var row = 0; row < batch.Length; row++)
         {
             _body.Append(batch, row);
