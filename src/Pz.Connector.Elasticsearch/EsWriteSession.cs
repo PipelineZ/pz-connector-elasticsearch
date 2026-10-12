@@ -137,6 +137,9 @@ internal sealed class EsWriteSession : ISinkWriteSession
             throw EsErrors.FromResponse(response, _redactor, context);
         }
 
+        // Reported before the failure below is thrown: a rejected bulk is exactly the one whose
+        // throttling and failed-item counts matter.
+        EsStats.ReportBulk(response, ConnectorStats.Current);
         if (response.Errors)
         {
             var failed = response.ItemsWithErrors.ToList();

@@ -89,6 +89,9 @@ jobs:
           PKG_DIR=".pz/packages/Pz.Connector.Elasticsearch/${PKG_VERSION}"
           test -f "${PKG_DIR}/native/Pz.Connector.Elasticsearch"
           pz run
+          # The connector reports its remote calls: the read and the write node each made requests.
+          RUN_DIR="$(ls -td .pz/runs/*/ | head -1)"
+          jq -e '[.nodes[] | select(.connector=="elasticsearch")] | (length == 2) and (map(.remote.requests > 0) | all)' "${RUN_DIR}run_results.json"
           # Three documents in, three documents out, ids carried along.
           curl -sf 'http://localhost:9200/e2e-out/_search?size=10' | tee out.json
           test "$(python3 -c "import json;print(json.load(open('out.json'))['hits']['total']['value'])")" -eq 3

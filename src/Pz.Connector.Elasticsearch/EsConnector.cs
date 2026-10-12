@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pz.Connectors.Abstractions;
+using Pz.Connectors.Sdk;
 
 namespace Pz.Connector.Elasticsearch;
 
@@ -13,14 +14,16 @@ public sealed class EsConnector : IConnector, ISourceConnector, ISinkConnector
     private readonly ILoggerFactory _loggerFactory;
     private readonly TimeProvider _time;
     private readonly Random _random;
+    private readonly RemoteCalls? _remote;
 
-    public EsConnector(ILoggerFactory? loggerFactory = null)
-        : this(loggerFactory, TimeProvider.System, Random.Shared)
+    public EsConnector(ILoggerFactory? loggerFactory = null, RemoteCalls? remote = null)
+        : this(loggerFactory, TimeProvider.System, Random.Shared, remote)
     {
     }
 
-    internal EsConnector(ILoggerFactory? loggerFactory, TimeProvider time, Random random)
+    internal EsConnector(ILoggerFactory? loggerFactory, TimeProvider time, Random random, RemoteCalls? remote = null)
     {
+        _remote = remote;
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _time = time;
         _random = random;
@@ -34,7 +37,7 @@ public sealed class EsConnector : IConnector, ISourceConnector, ISinkConnector
 
     public ConnectorCapabilities Capabilities =>
         ConnectorCapabilities.ColumnPruning | ConnectorCapabilities.BoundedWindow | ConnectorCapabilities.InclusiveWatermarkBound
-        | ConnectorCapabilities.Merge | ConnectorCapabilities.ReplaceWrites;
+        | ConnectorCapabilities.Merge | ConnectorCapabilities.ReplaceWrites | ConnectorCapabilities.ReportsStats;
 
     public string ConnectionConfigSchema => """
         { "type": "object", "required": ["url"], "properties": {
@@ -72,13 +75,13 @@ public sealed class EsConnector : IConnector, ISourceConnector, ISinkConnector
     ValueTask<ISource> ISourceConnector.OpenAsync(ConnectorConfig config, CancellationToken ct)
     {
         var connection = ParseOrThrow(config);
-        return ValueTask.FromResult<ISource>(new EsSource(connection, EsClientFactory.Create(connection), _loggerFactory.CreateLogger<EsSource>()));
+        return ValueTask.FromResult<ISource>(new EsSource(connection, EsClientFactory.Create(connection, _remote),_loggerFactory.CreateLogger<EsSource>()));
     }
 
     ValueTask<ISink> ISinkConnector.OpenAsync(ConnectorConfig config, CancellationToken ct)
     {
         var connection = ParseOrThrow(config);
-        return ValueTask.FromResult<ISink>(new EsSink(connection, EsClientFactory.Create(connection), _loggerFactory.CreateLogger<EsSink>(), _time, _random));
+        return ValueTask.FromResult<ISink>(new EsSink(connection, EsClientFactory.Create(connection, _remote),_loggerFactory.CreateLogger<EsSink>(), _time, _random));
     }
 
     public async ValueTask<ConnectionCheck> CheckConnectionAsync(ConnectorConfig config, CancellationToken ct)
@@ -92,7 +95,7 @@ public sealed class EsConnector : IConnector, ISourceConnector, ISinkConnector
 
         try
         {
-            var client = EsClientFactory.Create(connection);
+            var client = EsClientFactory.Create(connection, _remote);
             var info = await client.InfoAsync(ct).ConfigureAwait(false);
             if (!info.IsValidResponse)
             {

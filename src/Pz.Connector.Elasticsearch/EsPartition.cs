@@ -26,6 +26,7 @@ internal sealed class EsPartition(
     public async IAsyncEnumerable<RecordBatch> ReadAsync(BatchOptions options, [EnumeratorCancellation] CancellationToken ct)
     {
         var redactor = connection.Redactor;
+        var stats = ConnectorStats.Current;
         var context = $"dataset '{spec.Dataset}'";
         var opened = await client.OpenPointInTimeAsync(
             new OpenPointInTimeRequest(Indices.Parse(dataset.Index)) { KeepAlive = new Duration(dataset.PitKeepAlive) }, ct).ConfigureAwait(false);
@@ -57,6 +58,7 @@ internal sealed class EsPartition(
                 pages++;
                 using var doc = JsonDocument.Parse(response.Body);
                 var root = doc.RootElement;
+                EsStats.ReportSearch(root, stats);
                 if (root.TryGetProperty("pit_id", out var newPit) && newPit.ValueKind == JsonValueKind.String)
                 {
                     pitId = newPit.GetString()!;
