@@ -35,9 +35,9 @@ internal sealed class ColumnPlan
     public IReadOnlyList<string> SourcePaths =>
         Columns.Where(c => c.Kind != ColumnKind.Id).Select(c => string.Join('.', c.Path)).ToList();
 
-    /// <summary>Narrows to the named columns, in this plan's own order. A name this plan does not
-    /// have means the hint is unusable, and the full plan is returned -- the engine then drops the
-    /// hint the same way and the pipeline's SQL reports the unknown column.</summary>
+    /// <summary>Narrows to the named columns, in the order the hint lists them. A name this plan
+    /// does not have means the hint is unusable, and the full plan is returned -- the engine then
+    /// drops the hint the same way and the pipeline's SQL reports the unknown column.</summary>
     public ColumnPlan Project(IReadOnlyList<string>? columns)
     {
         if (columns is not { Count: > 0 })
@@ -45,9 +45,22 @@ internal sealed class ColumnPlan
             return this;
         }
 
-        var wanted = new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
-        var kept = Columns.Where(c => wanted.Contains(c.Name)).ToList();
-        return kept.Count == wanted.Count ? new ColumnPlan(kept) : this;
+        var kept = new List<ColumnSpec>();
+        foreach (var name in columns)
+        {
+            var column = Columns.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (column is null)
+            {
+                return this;
+            }
+
+            if (!kept.Contains(column))
+            {
+                kept.Add(column);
+            }
+        }
+
+        return new ColumnPlan(kept);
     }
 
     private static IArrowType ArrowType(ColumnKind kind) => kind switch

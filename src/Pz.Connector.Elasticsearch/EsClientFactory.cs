@@ -2,6 +2,7 @@ using System.Security.Cryptography.X509Certificates;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Serialization;
 using Elastic.Transport;
+using Pz.Connectors.Sdk;
 
 namespace Pz.Connector.Elasticsearch;
 
@@ -12,9 +13,19 @@ namespace Pz.Connector.Elasticsearch;
 /// Native AOT.</summary>
 internal static class EsClientFactory
 {
-    public static ElasticsearchClient Create(EsConnectionConfig config)
+    /// <param name="config">The connection.</param>
+    /// <param name="remote">When given, every HTTP request the client makes runs through the SDK's
+    /// counting handler (requests, wire bytes, 429/503 throttles) wrapped around the transport's own
+    /// handler, so certificate and proxy settings still apply.</param>
+    /// <param name="innerHandler">Replaces the transport's own handler under the counting wrapper;
+    /// for tests.</param>
+    public static ElasticsearchClient Create(EsConnectionConfig config, RemoteCalls? remote = null,
+        Func<HttpMessageHandler, HttpMessageHandler>? innerHandler = null)
     {
-        var settings = new ElasticsearchClientSettings(new SingleNodePool(config.Url), new HttpRequestInvoker(),
+        var invoker = remote is null
+            ? new HttpRequestInvoker()
+            : new HttpRequestInvoker((handler, _) => remote.HttpHandler(innerHandler?.Invoke(handler) ?? handler));
+        var settings = new ElasticsearchClientSettings(new SingleNodePool(config.Url), invoker,
                 (_, s) => new DefaultSourceSerializer(s, EsJsonContext.Default, _ => { }))
             .MaximumRetries(0)
             .DisablePing()

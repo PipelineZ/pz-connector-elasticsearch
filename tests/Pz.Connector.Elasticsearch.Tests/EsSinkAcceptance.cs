@@ -29,6 +29,10 @@ public sealed class EsSinkAcceptance : SinkConnectorAcceptanceTests
 
     protected override ISinkConnector CreateSink() => new EsConnector();
 
+    // The fixture reads back through one _search, which Elasticsearch caps at index.max_result_window
+    // (10000) documents.
+    protected override int LargeBatchRows => 10_000;
+
     protected override ConnectorConfig ValidConfig => new(_es.ConnectionConfig());
 
     protected override OutputSpec SmallOutput => new("elasticsearch", _append, "append", "fail_on_change", new Dictionary<string, object?>());

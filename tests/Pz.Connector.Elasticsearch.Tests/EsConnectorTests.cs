@@ -16,11 +16,11 @@ public sealed class EsConnectorTests
     }
 
     [Fact]
-    public void Declares_pruning_bounded_and_inclusive_watermarks_merge_and_replace()
+    public void Declares_pruning_bounded_and_inclusive_watermarks_merge_replace_and_stats()
     {
         Assert.Equal(
             ConnectorCapabilities.ColumnPruning | ConnectorCapabilities.BoundedWindow | ConnectorCapabilities.InclusiveWatermarkBound
-            | ConnectorCapabilities.Merge | ConnectorCapabilities.ReplaceWrites,
+            | ConnectorCapabilities.Merge | ConnectorCapabilities.ReplaceWrites | ConnectorCapabilities.ReportsStats,
             new EsConnector().Capabilities);
     }
 
