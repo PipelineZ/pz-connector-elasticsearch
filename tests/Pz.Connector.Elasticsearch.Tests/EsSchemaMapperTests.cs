@@ -68,7 +68,7 @@ public sealed class EsSchemaMapperTests
             ("dt", ColumnKind.Timestamp), ("dt_custom", ColumnKind.Text), ("dt_nanos", ColumnKind.Timestamp),
             ("dt_sec", ColumnKind.Timestamp), ("dt_std", ColumnKind.Timestamp), ("f", ColumnKind.Double),
             ("fl", ColumnKind.Json), ("g", ColumnKind.Json), ("hf", ColumnKind.Double), ("i", ColumnKind.Int32),
-            ("ip", ColumnKind.Text), ("k", ColumnKind.Text), ("l", ColumnKind.Int64), ("n", ColumnKind.Json),
+            ("ip", ColumnKind.Text), ("k", ColumnKind.Text), ("l", ColumnKind.Int64), ("n", ColumnKind.Nested),
             ("o.city", ColumnKind.Text), ("o.geo.lat", ColumnKind.Double), ("o_empty", ColumnKind.Json),
             ("s", ColumnKind.Int32), ("sf", ColumnKind.Double), ("t", ColumnKind.Text), ("ul", ColumnKind.Int64),
             ("v", ColumnKind.Json), ("w", ColumnKind.Json), ("_id", ColumnKind.Id),
@@ -146,5 +146,35 @@ public sealed class EsSchemaMapperTests
         Assert.Same(plan, plan.Project(["b", "nope"]));
         Assert.Same(plan, plan.Project(null));
         Assert.Same(plan, plan.Project([]));
+    }
+
+    [Fact]
+    public void Nested_with_typed_fields_is_a_list_of_struct_and_otherwise_stays_json_text()
+    {
+        var plan = EsSchemaMapper.Plan(Mappings("""
+            {"idx":{"mappings":{"properties":{
+              "items":{"type":"nested","properties":{"sku":{"type":"keyword"},"qty":{"type":"integer"},
+                "at":{"type":"date"},"dim":{"properties":{"w":{"type":"double"}}},
+                "parts":{"type":"nested","properties":{"n":{"type":"long"}}}}},
+              "geoish":{"type":"nested","properties":{"loc":{"type":"geo_point"}}},
+              "epoch":{"type":"nested","properties":{"at":{"type":"date","format":"epoch_millis"}}}
+            }}}}
+            """), Dataset(), "d", EsRedactor.None);
+
+        var items = plan.Columns.Single(c => c.Name == "items");
+        Assert.Equal(ColumnKind.Nested, items.Kind);
+        Assert.Equal("STRUCT(\"sku\" VARCHAR, \"qty\" INTEGER, \"at\" TIMESTAMP, \"dim\" STRUCT(\"w\" DOUBLE), \"parts\" STRUCT(\"n\" BIGINT)[])[]",
+            Pz.Connectors.Abstractions.Formats.ColumnContractType.ToDuckDbName(items.NestedType!));
+        Assert.Equal(ColumnKind.Json, plan.Columns.Single(c => c.Name == "geoish").Kind);
+        Assert.Equal(ColumnKind.Json, plan.Columns.Single(c => c.Name == "epoch").Kind);
+    }
+
+    [Fact]
+    public void Json_fields_keeps_a_nested_field_as_json_text()
+    {
+        var plan = EsSchemaMapper.Plan(Mappings("""{"idx":{"mappings":{"properties":{"n":{"type":"nested","properties":{"x":{"type":"integer"}}}}}}}"""),
+            Dataset("n"), "d", EsRedactor.None);
+
+        Assert.Equal(ColumnKind.Json, plan.Columns.Single(c => c.Name == "n").Kind);
     }
 }

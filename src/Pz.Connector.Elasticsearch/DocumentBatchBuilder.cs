@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
 using Apache.Arrow;
+using Apache.Arrow.Types;
+using Pz.Connectors.Abstractions.Formats;
 using Pz.Connectors.Abstractions;
 using Pz.Connectors.Abstractions.Batches;
 
@@ -59,6 +61,11 @@ internal sealed class DocumentBatchBuilder
             return value.GetRawText();
         }
 
+        if (column.Kind == ColumnKind.Nested)
+        {
+            return ToNested(column, value, id);
+        }
+
         if (value.ValueKind == JsonValueKind.Array)
         {
             throw Refuse(column, id, "holds an array; list it under json_fields: to land it as JSON text");
@@ -115,6 +122,26 @@ internal sealed class DocumentBatchBuilder
         }
 
         return true;
+    }
+
+    /// <summary>A nested field's array of objects as a list of structs. Elasticsearch accepts a
+    /// lone object where a nested field is mapped, which is a one-item list here.</summary>
+    private object? ToNested(ColumnSpec column, JsonElement value, string id)
+    {
+        var list = (ListType)column.NestedType!;
+        try
+        {
+            if (value.ValueKind == JsonValueKind.Object)
+            {
+                return new List<object?> { ColumnContractType.ValueFromJson(value, list.ValueDataType) };
+            }
+
+            return ColumnContractType.ValueFromJson(value, list);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException or JsonException or OverflowException)
+        {
+            throw Refuse(column, id, $"does not fit the mapped nested structure; list it under json_fields: to land it as JSON text");
+        }
     }
 
     private object ToInt32(ColumnSpec column, JsonElement value, string id)

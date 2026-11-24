@@ -84,4 +84,25 @@ public sealed class RowJsonWriterTests
         Assert.Null(ArrowScalars.Bytes(batch.Column(4), 1));
         Assert.Equal(Encoding.UTF8.GetBytes("7"), ArrowScalars.Bytes(batch.Column(0), 0));
     }
+
+    [Fact]
+    public void Nested_cells_are_json_objects_and_arrays()
+    {
+        var item = new StructType([new Field("sku", StringType.Default, true), new Field("qty", Int32Type.Default, true)]);
+        var schema = new Schema([new Field("items", new ListType(new Field("item", item, true)), true),
+            new Field("tags", new ListType(new Field("item", StringType.Default, true)), true)], null);
+        var skus = new StringArray.Builder().Append("x").Append("y").Build();
+        var qtys = new Int32Array.Builder().Append(1).AppendNull().Build();
+        var structs = new StructArray(item, 2, [skus, qtys], ArrowBuffer.Empty, 0);
+        var items = new ListArray(schema.FieldsList[0].DataType, 1,
+            new ArrowBuffer.Builder<int>().Append(0).Append(2).Build(), structs, ArrowBuffer.Empty, 0);
+        var tagValues = new StringArray.Builder().Append("p").Append("q").Build();
+        var tags = new ListArray(schema.FieldsList[1].DataType, 1,
+            new ArrowBuffer.Builder<int>().Append(0).Append(2).Build(), tagValues, ArrowBuffer.Empty, 0);
+        using var batch = new RecordBatch(schema, [items, tags], 1);
+
+        var json = Encoding.UTF8.GetString(new RowJsonWriter(schema, [0, 1]).Write(batch, 0));
+
+        Assert.Equal("""{"items":[{"sku":"x","qty":1},{"sku":"y","qty":null}],"tags":["p","q"]}""", json);
+    }
 }

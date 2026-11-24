@@ -24,6 +24,7 @@ internal sealed record EsOutputConfig(string Index, int BulkSize, int BulkBytes)
     [
         ArrowTypeId.String, ArrowTypeId.Int32, ArrowTypeId.Int64, ArrowTypeId.Double,
         ArrowTypeId.Decimal128, ArrowTypeId.Boolean, ArrowTypeId.Date32, ArrowTypeId.Timestamp,
+        ArrowTypeId.List, ArrowTypeId.FixedSizeList, ArrowTypeId.Struct, ArrowTypeId.Map,
     ];
 
     public static EsOutputConfig? Parse(OutputSpec spec, List<string> errors)
@@ -73,6 +74,11 @@ internal sealed record EsOutputConfig(string Index, int BulkSize, int BulkBytes)
 
         if (spec.Mode == "merge")
         {
+            foreach (var key in spec.Keys.Where(k => schema.FieldsList.Any(f => f.Name == k && IsNested(f.DataType))))
+            {
+                errors.Add($"{prefix}: key column '{key}' is a nested type (struct, list or map); a merge key must be a flat value because the document _id is built from it -- key on a scalar column or flatten it in the pipeline");
+            }
+
             if (spec.Keys.Count == 0)
             {
                 errors.Add($"{prefix}: mode merge needs 'keys:' -- the document _id is built from them");
@@ -84,6 +90,9 @@ internal sealed record EsOutputConfig(string Index, int BulkSize, int BulkBytes)
             }
         }
     }
+
+    private static bool IsNested(Apache.Arrow.Types.IArrowType type) =>
+        type.TypeId is ArrowTypeId.List or ArrowTypeId.FixedSizeList or ArrowTypeId.Struct or ArrowTypeId.Map;
 
     private static int Int(OutputSpec spec, string option, int fallback, int min, int max, string prefix, List<string> errors)
     {

@@ -20,7 +20,8 @@ public sealed class EsConnectorTests
     {
         Assert.Equal(
             ConnectorCapabilities.ColumnPruning | ConnectorCapabilities.BoundedWindow | ConnectorCapabilities.InclusiveWatermarkBound
-            | ConnectorCapabilities.Merge | ConnectorCapabilities.ReplaceWrites | ConnectorCapabilities.ReportsStats,
+            | ConnectorCapabilities.Merge | ConnectorCapabilities.ReplaceWrites | ConnectorCapabilities.ReportsStats
+            | ConnectorCapabilities.NestedTypes,
             new EsConnector().Capabilities);
     }
 

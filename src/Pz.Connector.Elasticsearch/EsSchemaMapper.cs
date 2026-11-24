@@ -1,5 +1,6 @@
 using Apache.Arrow;
 using Apache.Arrow.Types;
+using Pz.Connectors.Abstractions.Formats;
 using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Mapping;
 
@@ -7,7 +8,7 @@ namespace Pz.Connector.Elasticsearch;
 
 /// <summary>How a column's value is read out of a document. <see cref="Id"/> is the document id,
 /// which lives outside <c>_source</c>.</summary>
-internal enum ColumnKind { Int32, Int64, Double, Boolean, Timestamp, Text, Json, Id }
+internal enum ColumnKind { Int32, Int64, Double, Boolean, Timestamp, Text, Json, Nested, Id }
 
 internal enum EpochUnit { Milliseconds, Seconds }
 
@@ -16,6 +17,9 @@ internal enum EpochUnit { Milliseconds, Seconds }
 internal sealed record ColumnSpec(string Name, string[] Path, ColumnKind Kind, EpochUnit Epoch = EpochUnit.Milliseconds)
 {
     public string MappingType { get; init; } = "";
+
+    /// <summary>The Arrow type of a <see cref="ColumnKind.Nested"/> column: a list of struct.</summary>
+    public IArrowType? NestedType { get; init; }
 }
 
 /// <summary>The dataset's Arrow schema and, per column, how to fill it.</summary>
@@ -24,7 +28,7 @@ internal sealed class ColumnPlan
     public ColumnPlan(IReadOnlyList<ColumnSpec> columns)
     {
         Columns = columns;
-        Schema = new Schema(columns.Select(c => new Field(c.Name, ArrowType(c.Kind), c.Kind != ColumnKind.Id)).ToList(), null);
+        Schema = new Schema(columns.Select(c => new Field(c.Name, c.Kind == ColumnKind.Nested ? c.NestedType! : ArrowType(c.Kind), c.Kind != ColumnKind.Id)).ToList(), null);
     }
 
     public IReadOnlyList<ColumnSpec> Columns { get; }
@@ -101,7 +105,7 @@ internal static class EsSchemaMapper
             {
                 if (byName.TryGetValue(column.Name, out var existing))
                 {
-                    if (existing.Kind != column.Kind || existing.Epoch != column.Epoch)
+                    if (existing.Kind != column.Kind || existing.Epoch != column.Epoch || NestedName(existing) != NestedName(column))
                     {
                         throw EsErrors.Fatal(
                             $"dataset '{datasetName}': field '{column.Name}' is mapped as '{existing.MappingType}' in one index and " +
@@ -120,6 +124,9 @@ internal static class EsSchemaMapper
         columns.Add(new ColumnSpec("_id", [], ColumnKind.Id));
         return new ColumnPlan(columns);
     }
+
+    private static string? NestedName(ColumnSpec column) =>
+        column.NestedType is null ? null : ColumnContractType.ToDuckDbName(column.NestedType);
 
     private static IEnumerable<ColumnSpec> Walk(Properties properties, string[] parent, IReadOnlySet<string> jsonFields)
     {
@@ -152,6 +159,21 @@ internal static class EsSchemaMapper
                     }
 
                     continue;
+                case "nested":
+                    if (property is NestedProperty { Properties: { } items } && NestedItemType(items) is { } itemType)
+                    {
+                        yield return new ColumnSpec(name, path, ColumnKind.Nested)
+                        {
+                            MappingType = type,
+                            NestedType = new ListType(new Field("item", itemType, true)),
+                        };
+                    }
+                    else
+                    {
+                        yield return new ColumnSpec(name, path, ColumnKind.Json) { MappingType = type };
+                    }
+
+                    continue;
                 case "date":
                 case "date_nanos":
                     var format = property switch
@@ -177,6 +199,63 @@ internal static class EsSchemaMapper
             yield return new ColumnSpec(name, path, kind) { MappingType = type };
         }
     }
+
+    /// <summary>The struct one <c>nested</c> item lands as, or null when any field inside has no
+    /// typed spelling (geo, flattened, a custom date format, ...), in which case the whole column
+    /// stays JSON text rather than losing that field. Fields come in mapping order; an empty
+    /// <c>object</c> or <c>nested</c> inside is unsupported for the same reason.</summary>
+    private static StructType? NestedItemType(Properties properties)
+    {
+        var fields = new List<Field>();
+        foreach (var (propertyName, property) in properties)
+        {
+            var type = property.Type ?? "";
+            IArrowType? arrow;
+            switch (property)
+            {
+                case ObjectProperty { Properties: { } inner } when type == "object" && inner.Any():
+                    arrow = NestedItemType(inner);
+                    break;
+                case NestedProperty { Properties: { } inner } when inner.Any():
+                    arrow = NestedItemType(inner) is { } item ? new ListType(new Field("item", item, true)) : null;
+                    break;
+                case DateProperty { Format: var f }:
+                    arrow = NestedDateFormat(f) ? new TimestampType(TimeUnit.Microsecond, "UTC") : null;
+                    break;
+                case DateNanosProperty { Format: var f }:
+                    arrow = NestedDateFormat(f) ? new TimestampType(TimeUnit.Microsecond, "UTC") : null;
+                    break;
+                default:
+                    arrow = type switch
+                    {
+                        "integer" or "short" or "byte" => Int32Type.Default,
+                        "long" or "unsigned_long" => Int64Type.Default,
+                        "float" or "half_float" or "double" or "scaled_float" => DoubleType.Default,
+                        "boolean" => BooleanType.Default,
+                        "keyword" or "constant_keyword" or "wildcard" or "text" or "match_only_text" or "search_as_you_type"
+                            or "ip" or "version" => StringType.Default,
+                        _ => null,
+                    };
+                    break;
+            }
+
+            if (arrow is null)
+            {
+                return null;
+            }
+
+            fields.Add(new Field(propertyName.Name ?? "", arrow, true));
+        }
+
+        return fields.Count == 0 ? null : new StructType(fields);
+    }
+
+    /// <summary>Inside a nested struct a timestamp is read from an ISO-8601 string; epoch numbers
+    /// have no spelling there, so only the ISO formats qualify.</summary>
+    private static bool NestedDateFormat(string? format) =>
+        string.IsNullOrEmpty(format)
+        || format.Split("||", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .All(a => a is "strict_date_optional_time" or "strict_date_optional_time_nanos" or "date_optional_time");
 
     private static ColumnSpec DateColumn(string name, string[] path, string type, string? format)
     {

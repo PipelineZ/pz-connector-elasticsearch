@@ -71,7 +71,8 @@ trailing `_id`:
 | `date` with any other `format` | varchar | the source text, unparsed |
 | `keyword`, `text`, `wildcard`, `ip`, `version`, `binary`, ... | varchar | the string |
 | `object` with properties | flattened into `parent.child` columns | |
-| `nested`, `flattened`, `geo_*`, vectors, ranges, anything else | varchar | the field's JSON |
+| `nested` whose fields are all typed (scalars, dates in ISO formats, `object`, `nested`) | list of struct | one struct per item; a lone object reads as a one-item list. Changed from JSON text: list the field under `json_fields` to keep text, or cast `col::JSON::VARCHAR` |
+| other `nested`, `flattened`, `geo_*`, vectors, ranges, anything else | varchar | the field's JSON |
 | anything under `json_fields` | varchar | the field's JSON, and an object listed there is not flattened |
 
 Standard date formats: `strict_date_optional_time`, `strict_date_optional_time_nanos`,
@@ -114,7 +115,11 @@ binary stays Native AOT.
 Every row becomes one JSON document of every column: integers and doubles as numbers, decimals as
 strings (every digit), booleans, dates as `yyyy-MM-dd`, timestamps as `yyyy-MM-ddTHH:mm:ss.ffffffZ`,
 nulls as `null`. A dotted column name becomes a dotted key, which Elasticsearch treats as an object
-path. Columns outside pz's type matrix are refused before a request is sent.
+path. Struct, list and map columns (`NestedTypes`) are written as JSON objects and arrays in the
+document; the index's mapping is left to Elasticsearch's dynamic mapping, so an array of structs is
+mapped as `object`, not `nested`, unless you created the index with a `nested` mapping. A struct,
+list or map cannot be a merge key (the `_id` is built from flat values). Other columns outside pz's
+type matrix are refused before a request is sent.
 
 - **`append`**: Elasticsearch assigns each document's `_id`. At-least-once across runs, as for every
   `append` output; the index is created on first write with dynamic mapping unless you created it.

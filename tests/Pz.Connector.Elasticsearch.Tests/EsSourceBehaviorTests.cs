@@ -54,7 +54,7 @@ public sealed class EsSourceBehaviorTests
     private static string? Str(IArrowArray a, int row) => ((StringArray)a).GetString(row);
 
     [SkippableFact]
-    public async Task Objects_flatten_nested_and_json_fields_land_as_json_text_and_custom_dates_as_text()
+    public async Task Objects_flatten_nested_lands_as_list_of_struct_and_json_fields_land_as_json_text_and_custom_dates_as_text()
     {
         var index = await _es.CreateIndexAsync("\"id\":{\"type\":\"long\"},\"addr\":{\"properties\":{\"city\":{\"type\":\"keyword\"},\"geo\":{\"type\":\"geo_point\"}}},\"items\":{\"type\":\"nested\",\"properties\":{\"sku\":{\"type\":\"keyword\"}}},\"tags\":{\"type\":\"keyword\"},\"day\":{\"type\":\"date\",\"format\":\"yyyy-MM-dd\"},\"ts\":{\"type\":\"date\"}");
         await _es.BulkAsync(index, [("a", """{"id":1,"addr":{"city":"Lyon","geo":{"lat":45.7,"lon":4.8}},"items":[{"sku":"x"},{"sku":"y"}],"tags":["p","q"],"day":"2026-09-08","ts":"2026-09-08T10:11:12Z"}""")]);
@@ -65,7 +65,10 @@ public sealed class EsSourceBehaviorTests
         Assert.Equal("Lyon", Column(batches, "addr.city", Str)[0]);
         Assert.Equal("""{"lat":45.7,"lon":4.8}""", Column(batches, "addr.geo", Str)[0]);
         Assert.Equal("2026-09-08", Column(batches, "day", Str)[0]);
-        Assert.Equal("""[{"sku":"x"},{"sku":"y"}]""", Column(batches, "items", Str)[0]);
+        var items = (ListArray)batches[0].Column(batches[0].Schema.GetFieldIndex("items"));
+        Assert.Equal(2, items.GetValueLength(0));
+        var skus = (StringArray)((StructArray)items.Values).Fields[0];
+        Assert.Equal(["x", "y"], [skus.GetString(0), skus.GetString(1)]);
         Assert.Equal("""["p","q"]""", Column(batches, "tags", Str)[0]);
         Assert.Equal(new DateTimeOffset(2026, 9, 8, 10, 11, 12, TimeSpan.Zero), Column(batches, "ts", (a, r) => ((TimestampArray)a).GetTimestamp(r)!.Value)[0]);
         Assert.Equal("a", Column(batches, "_id", Str)[0]);
@@ -156,5 +159,43 @@ public sealed class EsSourceBehaviorTests
         var refused = await new EsConnector().CheckConnectionAsync(
             new ConnectorConfig(new Dictionary<string, object?> { ["url"] = "http://127.0.0.1:1", ["timeout"] = 2L }), CancellationToken.None);
         Assert.False(refused.Ok);
+    }
+
+    [SkippableFact]
+    public async Task A_nested_field_reads_into_typed_structs_and_json_fields_keeps_the_text()
+    {
+        var index = await _es.CreateIndexAsync("\"id\":{\"type\":\"long\"},\"items\":{\"type\":\"nested\",\"properties\":{\"sku\":{\"type\":\"keyword\"},\"qty\":{\"type\":\"integer\"}}}");
+        await _es.BulkAsync(index, [
+            ("a", """{"id":1,"items":[{"sku":"x","qty":2},{"sku":"y"}]}"""),
+            ("b", """{"id":2,"items":{"sku":"solo","qty":5}}"""),
+            ("c", """{"id":3}""")]);
+
+        var batches = await ReadAsync(Spec(index));
+
+        var rows = new List<string>();
+        foreach (var batch in batches)
+        {
+            var ids = (StringArray)batch.Column(batch.Schema.GetFieldIndex("_id"));
+            var items = batch.Column(batch.Schema.GetFieldIndex("items"));
+            for (var r = 0; r < batch.Length; r++)
+            {
+                rows.Add(ids.GetString(r) + "=" + (items.IsNull(r) ? "null" : Pz.Connectors.Abstractions.Batches.ArrowCell.ToJson(items, r)));
+            }
+        }
+
+        Assert.Equal(["a=" + """[{"qty":2,"sku":"x"},{"qty":null,"sku":"y"}]""", "b=" + """[{"qty":5,"sku":"solo"}]""", "c=null"], rows.Order());
+        foreach (var b in batches) b.Dispose();
+    }
+
+    [SkippableFact]
+    public async Task A_nested_value_that_does_not_fit_the_mapping_fails_naming_field_and_document()
+    {
+        var index = await _es.CreateIndexAsync("\"id\":{\"type\":\"long\"},\"items\":{\"type\":\"nested\",\"properties\":{\"tags\":{\"type\":\"keyword\"}}}");
+        await _es.BulkAsync(index, [("r9", """{"id":1,"items":[{"tags":["p","q"]}]}""")]);
+
+        var ex = await Assert.ThrowsAsync<PzConnectorException>(() => ReadAsync(Spec(index)));
+
+        Assert.Contains("field 'items' of document 'r9' does not fit the mapped nested structure", ex.Message);
+        Assert.Contains("json_fields:", ex.Message);
     }
 }
