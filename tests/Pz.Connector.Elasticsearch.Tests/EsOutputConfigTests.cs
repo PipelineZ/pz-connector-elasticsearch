@@ -70,4 +70,25 @@ public sealed class EsOutputConfigTests
         EsOutputConfig.ValidateSchema(Spec([]), Schema, errors);
         Assert.Empty(errors);
     }
+
+    [Theory]
+    [InlineData("struct")]
+    [InlineData("list")]
+    [InlineData("map")]
+    public void A_nested_merge_key_is_refused_naming_the_column(string kind)
+    {
+        var s = new StructType([new Field("a", StringType.Default, true)]);
+        IArrowType type = kind switch
+        {
+            "struct" => s,
+            "list" => new ListType(new Field("item", StringType.Default, true)),
+            _ => new MapType(new Field("key", StringType.Default, false), new Field("value", StringType.Default, true)),
+        };
+        var schema = new Schema([new Field("id", Int64Type.Default, true), new Field("k", type, true)], null);
+        var errors = new List<string>();
+
+        EsOutputConfig.ValidateSchema(Spec([], "merge", ["k"]), schema, errors);
+
+        Assert.Contains(errors, e => e.Contains("key column 'k' is a nested type") && e.Contains("merge key must be a flat value"));
+    }
 }

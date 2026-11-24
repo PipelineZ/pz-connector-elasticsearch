@@ -17,6 +17,7 @@ public sealed class EsSinkAcceptance : SinkConnectorAcceptanceTests
     private readonly EsFixture _es;
     private readonly string _append = EsFixture.NewName("append");
     private readonly string _merge = EsFixture.NewName("merge");
+    private readonly string _nested = EsFixture.NewName("nested");
     private readonly string _replace = EsFixture.NewName("replace");
 
     public EsSinkAcceptance(EsFixture es)
@@ -43,6 +44,8 @@ public sealed class EsSinkAcceptance : SinkConnectorAcceptanceTests
     protected override Task ResetMergeTargetAsync() => _es.DeleteIndexAsync(_merge);
 
     protected override OutputSpec? ReplaceOutput => new("elasticsearch", _replace, "replace", "fail_on_change", new Dictionary<string, object?>());
+
+    protected override OutputSpec? NestedOutput => new("elasticsearch", _nested, "append", "fail_on_change", new Dictionary<string, object?>());
 
     protected override async ValueTask<IReadOnlyList<RecordBatch>> ReadCommittedAsync(ISinkConnector connector, OutputSpec spec)
     {

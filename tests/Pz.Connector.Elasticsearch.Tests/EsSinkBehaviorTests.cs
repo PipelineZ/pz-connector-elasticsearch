@@ -188,4 +188,29 @@ public sealed class EsSinkBehaviorTests
     {
         public override DateTimeOffset GetUtcNow() => now;
     }
+
+    [SkippableFact]
+    public async Task Nested_columns_are_indexed_as_json_objects_and_arrays_and_read_back_typed()
+    {
+        var index = EsFixture.NewName("nested");
+        var item = new Apache.Arrow.Types.StructType([new Field("sku", StringType.Default, true), new Field("qty", Int32Type.Default, true)]);
+        var schema = new Schema([new Field("id", Int64Type.Default, false),
+            new Field("items", new Apache.Arrow.Types.ListType(new Field("item", item, true)), true)], null);
+        var structs = new StructArray(item, 2,
+            [new StringArray.Builder().Append("x").Append("y").Build(), new Int32Array.Builder().Append(1).Append(2).Build()],
+            ArrowBuffer.Empty, 0);
+        var items = new ListArray(schema.FieldsList[1].DataType, 1,
+            new ArrowBuffer.Builder<int>().Append(0).Append(2).Build(), structs, ArrowBuffer.Empty, 0);
+        using var batch = new RecordBatch(schema, [new Int64Array.Builder().Append(1).Build(), items], 1);
+        await using var sink = await OpenAsync();
+        var spec = Spec(index, "append");
+        await using (var session = await sink.BeginWriteAsync(spec, schema, CancellationToken.None))
+        {
+            await session.WriteBatchAsync(batch, CancellationToken.None);
+            await session.CommitAsync(CancellationToken.None);
+        }
+
+        var doc = (await _es.SearchAllAsync(index)).Single().Source;
+        Assert.Equal("""[{"sku":"x","qty":1},{"sku":"y","qty":2}]""", doc.GetProperty("items").GetRawText());
+    }
 }
