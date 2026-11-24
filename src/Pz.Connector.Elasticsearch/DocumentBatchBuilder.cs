@@ -140,7 +140,7 @@ internal sealed class DocumentBatchBuilder
         }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException or JsonException or OverflowException)
         {
-            throw Refuse(column, id, $"does not fit the mapped nested structure ({ex.Message}); list it under json_fields: to land it as JSON text");
+            throw Refuse(column, id, $"does not fit the mapped nested structure; list it under json_fields: to land it as JSON text");
         }
     }
 
